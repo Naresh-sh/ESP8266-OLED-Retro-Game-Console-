@@ -85,8 +85,8 @@ Install these libraries from Arduino Library Manager:
 The console starts with a password lock.
 
 ### Password:
-```text
-UP → UP → UP → UP
+
+UP → UP → UP → UP       (you also change according to you pattern}
 
 
 
@@ -121,3 +121,8 @@ Upload the code
 Made with ❤️ using ESP8266 and OLED Display.
 
 GitHub: naresh
+
+
+<img width="1372" height="1147" alt="WhatsApp Image 2026-05-11 at 3 44 59 PM" src="https://github.com/user-attachments/assets/a0c133d3-c9d3-4c92-8101-d59c3878a423" />
+<img width="1370" height="1148" alt="WhatsApp Image 2026-05-11 at 3 44 59 PM (1)" src="https://github.com/user-attachments/assets/23102c78-3c03-4ab0-83ec-fbfe115551e8" />
+<img width="1370" height="1148" alt="WhatsApp Image 2026-05-11 at 3 44 59 PM (2)" src="https://github.com/user-attachments/assets/a2dda7e3-868d-4bb9-8975-33b0914e95cc" />

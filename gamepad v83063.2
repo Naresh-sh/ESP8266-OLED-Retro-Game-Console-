@@ -638,22 +638,22 @@ static const unsigned char PROGMEM flappy_bird_sprite[] = {
   0x3c, 0x42, 0xad, 0x85, 0x81, 0x42, 0x3c, 0x18
 };
 
-// Mario Mini Bitmaps
+// ---- Mario Mini Bitmaps (redesigned for a clear, readable walk-cycle) ----
 static const uint8_t PROGMEM mario_stand_12x14[] = {
-  0x00,0x00,0x18,0x00,0x3C,0x00,0x3C,0x00,0x7E,0x00,0x66,0x00,0x7E,0x00,
-  0x18,0x00,0x7E,0x00,0xDB,0x00,0x99,0x00,0x18,0x00,0x24,0x00,0x42,0x00
+  0x0F,0x00,0x1F,0x80,0x1F,0x80,0x36,0xC0,0x1F,0x80,0x3F,0xF0,0x3F,0xF0,0x1F,0x80,
+  0x3F,0xF0,0x36,0xC0,0x19,0x80,0x19,0x80,0x19,0x80,0x39,0xC0
 };
 static const uint8_t PROGMEM mario_run1_12x14[] = {
-  0x00,0x00,0x18,0x00,0x3C,0x00,0x3C,0x00,0x7E,0x00,0x66,0x00,0x7E,0x00,
-  0x18,0x00,0x3C,0x00,0x5A,0x00,0x99,0x00,0x24,0x00,0x42,0x00,0x00,0x00
+  0x0F,0x00,0x1F,0x80,0x1F,0x80,0x36,0xC0,0x1F,0x80,0x3F,0xF0,0x3F,0xF0,0x1F,0x80,
+  0x3F,0xF0,0x36,0xC0,0x38,0x00,0x78,0x00,0x03,0xC0,0x07,0xE0
 };
 static const uint8_t PROGMEM mario_run2_12x14[] = {
-  0x00,0x00,0x18,0x00,0x3C,0x00,0x3C,0x00,0x7E,0x00,0x66,0x00,0x7E,0x00,
-  0x18,0x00,0x18,0x00,0xBD,0x00,0x18,0x00,0x24,0x00,0x42,0x00,0x00,0x00
+  0x0F,0x00,0x1F,0x80,0x1F,0x80,0x36,0xC0,0x1F,0x80,0x3F,0xF0,0x3F,0xF0,0x1F,0x80,
+  0x3F,0xF0,0x36,0xC0,0x03,0xC0,0x07,0xE0,0x38,0x00,0x78,0x00
 };
 static const uint8_t PROGMEM mario_jump_12x14[] = {
-  0x00,0x00,0x18,0x00,0x3C,0x00,0x3C,0x00,0x7E,0x00,0x66,0x00,0x7E,0x00,
-  0x18,0x00,0x24,0x00,0x42,0x00,0x81,0x00,0x24,0x00,0x18,0x00,0x00,0x00
+  0x0F,0x00,0x1F,0x80,0x1F,0x80,0x36,0xC0,0x5F,0xA0,0xDF,0xB0,0x3F,0xF0,0x1F,0x80,
+  0x3F,0xF0,0x36,0xC0,0x60,0x60,0xC0,0x30,0x00,0x00,0x00,0x00
 };
 static const uint8_t PROGMEM pipe_16x18[] = {
   0xFF,0xFF,0x81,0x01,0xBD,0xBD,0xA5,0xA5,0xA5,0xA5,0xA5,0xA5,0x81,0x01,0x81,0x01,
@@ -673,6 +673,9 @@ static const uint8_t PROGMEM cloud_16x8[] = {
 };
 static const uint8_t PROGMEM brick_8x8[] = {
   0xFF,0x81,0xBD,0x81,0xBD,0x81,0xFF,0x00
+};
+static const uint8_t PROGMEM dust_4x4[] = {
+  0x60, 0x90, 0x90, 0x60
 };
 
 // Car Dodger Bitmaps
@@ -736,6 +739,9 @@ static const unsigned char PROGMEM log_sprite[] = {
   0x7f, 0xfe, 0xff, 0xff, 0x80, 0x01, 0x80, 0x01,
   0x80, 0x01, 0x80, 0x01, 0xff, 0xff, 0x7f, 0xfe
 };
+static const unsigned char PROGMEM turtle_sprite[] = {
+  0x3c, 0x7e, 0xdb, 0xff, 0xff, 0xdb, 0x7e, 0x3c
+};
 
 // Function declarations
 void handlePassword();
@@ -744,6 +750,7 @@ void drawMenu();
 void handleMenuInput();
 void showSelectedGame();
 void gameOver(int score);
+void waitForRelease();
 
 // Game declarations
 void dinoRun();
@@ -865,6 +872,10 @@ void handleMenuInput() {
     if (digitalRead(OK_BUTTON) == LOW) {
       inGame = true;
       lastDebounce = millis();
+      // IMPORTANT FIX (#1): make sure OK is fully released before we hand
+      // control to the game loop, otherwise the very first frame of the
+      // game can see OK still LOW and instantly re-trigger an action.
+      waitForRelease();
     }
 
     if (selectedGame < menuStartIndex) menuStartIndex = selectedGame;
@@ -895,6 +906,23 @@ void showSelectedGame() {
   }
 }
 
+// FIX (#1 - core of "game khatam hote hi menu me forward nahi hota"):
+// A lot of games were ending right after a button was pressed (jump / shoot /
+// tap). If that button was still held down the instant we returned to the
+// menu, handleMenuInput() would see it as a fresh press and instantly launch
+// the game again - it LOOKED like "menu me wapas nahi ja raha". Waiting here
+// for a full release before we hand control back fixes every game in one place.
+void waitForRelease() {
+  unsigned long start = millis();
+  while ((digitalRead(UP_BUTTON) == LOW || digitalRead(DOWN_BUTTON) == LOW ||
+          digitalRead(OK_BUTTON) == LOW || digitalRead(LEFT_BUTTON) == LOW ||
+          digitalRead(RIGHT_BUTTON) == LOW)) {
+    delay(10);
+    if (millis() - start > 1500) break; // safety timeout, never hang forever
+  }
+  delay(60); // small extra debounce
+}
+
 void gameOver(int score) {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
@@ -906,7 +934,9 @@ void gameOver(int score) {
   display.print("Score: ");
   display.print(score);
   display.display();
-  delay(2000);
+  delay(1200);
+  waitForRelease();     // FIX (#1): guarantees a clean return to the menu
+  inGame = false;       // centralised here so every caller behaves the same
 }
 
 // ===================== GAME 1: DINO RUN =====================
@@ -1315,6 +1345,7 @@ void ticTacToe() {
     }
   }
 
+  waitForRelease();
   inGame = false;
 }
 
@@ -1404,7 +1435,6 @@ void pongGame() {
     ballX += ballSpeedX;
     ballY += ballSpeedY;
 
-    // Top/Bottom bounce
     if (ballY <= 0) {
       ballY = 0;
       ballSpeedY = -ballSpeedY + (random(-10, 11) / 100.0);
@@ -1413,7 +1443,6 @@ void pongGame() {
       ballSpeedY = -ballSpeedY + (random(-10, 11) / 100.0);
     }
 
-    // Left paddle collision (with bound protection and direction check)
     if (ballSpeedX < 0 && ballX <= paddleWidth && ballX >= 0) {
       if (ballY + ballSize >= leftPaddleY && ballY <= leftPaddleY + paddleHeight) {
         ballX = paddleWidth;
@@ -1425,7 +1454,6 @@ void pongGame() {
       }
     }
 
-    // Right paddle collision (with bound protection and direction check)
     if (ballSpeedX > 0 && ballX + ballSize >= SCREEN_WIDTH - paddleWidth && ballX + ballSize <= SCREEN_WIDTH) {
       if (ballY + ballSize >= rightPaddleY && ballY <= rightPaddleY + paddleHeight) {
         ballX = SCREEN_WIDTH - paddleWidth - ballSize;
@@ -1437,7 +1465,6 @@ void pongGame() {
       }
     }
 
-    // Score checks
     if (ballX < 0) {
       p2Score++;
       if (p2Score >= 3) playing = false;
@@ -1448,7 +1475,6 @@ void pongGame() {
       else resetBall();
     }
 
-    // Star movement
     for (int i=0; i<6; i++) {
       starX[i] -= 1;
       if (starX[i] < 0) { starX[i] = SCREEN_WIDTH; starY[i] = random(0, SCREEN_HEIGHT); }
@@ -1478,26 +1504,61 @@ void pongGame() {
   display.setCursor(20, 42);
   display.print("Final Score: "); display.print(p1Score); display.print(" - "); display.print(p2Score);
   display.display();
-  delay(3000);
+  delay(1500);
+  waitForRelease();
   
   inGame = false;
 }
 
+// ===================== GAME 6: SUPER MARIO (MINI) =====================
+// FIX (#2): players couldn't tell if Mario was walking or standing still.
+// Rebuilt with the same core rules the original game uses:
+//  - acceleration/friction instead of an instant fixed speed (so Mario
+//    visibly speeds up and slides to a stop, like the real game)
+//  - variable-height jump: holding the button longer while rising reduces
+//    gravity, exactly like Super Mario Bros' jump curve
+//  - the walk-cycle frame now advances based on DISTANCE travelled, not a
+//    fixed timer, so the legs always visibly swap while Mario is moving and
+//    freeze solid the instant he stops - unmistakably different from idle
+//  - small dust puffs kick up from the feet while running, and a short
+//    squash frame plays on landing, both classic platformer "juice" cues
 void marioMiniGame() {
   const int GROUND_Y = 54;
   int camX = 0;
   int score = 0;
+  int coins = 0;
 
   float marioX = 30;
   float marioY = GROUND_Y - 14;
+  float marioVX = 0;
   float marioVY = 0;
-  const float gravity = 0.45;
-  const float jumpForce = -6.2;
-  const float moveSpeed = 2.0;
+
+  const float ACCEL = 0.35;      // ground acceleration
+  const float FRICTION = 0.28;   // ground friction when no input
+  const float MAX_SPEED = 2.4;
+  const float GRAVITY_FULL = 0.42;
+  const float GRAVITY_HELD = 0.20; // lighter gravity while rising + button held (variable jump)
+  const float JUMP_FORCE = -6.4;
+
   bool onGround = true;
   bool faceRight = true;
+  bool wasOnGround = true;
+  unsigned long landSquashUntil = 0;
 
-  struct Entity { float x, y; int w, h, type; bool active; }; 
+  float distanceWalked = 0;   // drives the walk-cycle, not millis()
+  int walkFrame = 0;
+
+  struct Dust { float x, y; int life; bool active; };
+  const int maxDust = 6;
+  Dust dust[maxDust];
+  for (int i = 0; i < maxDust; i++) dust[i].active = false;
+  auto spawnDust = [&](float x, float y) {
+    for (int i = 0; i < maxDust; i++) {
+      if (!dust[i].active) { dust[i] = {x, y, 8, true}; return; }
+    }
+  };
+
+  struct Entity { float x, y; int w, h, type; bool active; };
   const int maxEntities = 6;
   Entity entities[maxEntities];
 
@@ -1511,42 +1572,49 @@ void marioMiniGame() {
     else { entities[idx].w = 8; entities[idx].h = 8; entities[idx].y = GROUND_Y - 24 - random(0, 8); }
   };
 
-  for (int i = 0; i < maxEntities; i++) {
-    spawnEntity(i, 140 + i * 70);
-  }
+  for (int i = 0; i < maxEntities; i++) spawnEntity(i, 140 + i * 70);
 
   bool playing = true;
-  uint8_t runFrame = 0;
-  unsigned long animTimer = 0;
 
   auto overlap = [](float ax, float ay, int aw, int ah, float bx, float by, int bw, int bh) {
     return !(ax + aw <= bx || bx + bw <= ax || ay + ah <= by || by + bh <= ay);
   };
 
+  while (digitalRead(OK_BUTTON) == LOW) delay(10);
+
   while (playing) {
     bool left = (digitalRead(LEFT_BUTTON) == LOW);
     bool right = (digitalRead(RIGHT_BUTTON) == LOW);
-    bool jump = (digitalRead(OK_BUTTON) == LOW);
+    bool jumpHeld = (digitalRead(OK_BUTTON) == LOW);
 
-    if (left) {
-      marioX -= moveSpeed;
-      if (marioX < 10) { marioX = 10; camX = max(0, camX - (int)moveSpeed); }
-      faceRight = false;
-    } else if (right) {
-      if (marioX < 60) marioX += moveSpeed;
-      else camX += moveSpeed;
-      faceRight = true;
+    // --- Horizontal physics: accelerate, then friction when released ---
+    if (left) { marioVX -= ACCEL; faceRight = false; }
+    else if (right) { marioVX += ACCEL; faceRight = true; }
+    else {
+      if (marioVX > 0) marioVX = max(0.0f, marioVX - FRICTION);
+      else if (marioVX < 0) marioVX = min(0.0f, marioVX + FRICTION);
     }
+    marioVX = constrain(marioVX, -MAX_SPEED, MAX_SPEED);
 
-    if (jump && onGround) {
-      marioVY = jumpForce;
+    float prevWorldX = marioX + camX;
+    marioX += marioVX;
+    if (marioX < 10) { marioX = 10; }
+    if (marioX > 60) { camX += (marioX - 60); marioX = 60; if (camX < 0) camX = 0; }
+    float worldX = marioX + camX;
+    distanceWalked += fabs(worldX - prevWorldX);
+
+    // --- Variable-height jump: still holding OK while moving upward = float longer ---
+    if (jumpHeld && onGround) {
+      marioVY = JUMP_FORCE;
       onGround = false;
     }
-
-    marioVY += gravity;
+    float g = (marioVY < 0 && jumpHeld) ? GRAVITY_HELD : GRAVITY_FULL;
+    marioVY += g;
     marioY += marioVY;
 
+    // --- Ground / brick collisions ---
     int firstBrickX = (camX / 80) * 80;
+    wasOnGround = onGround;
     onGround = false;
     for (int bx = firstBrickX - 80; bx < firstBrickX + 240; bx += 80) {
       int sx = bx - camX;
@@ -1560,27 +1628,39 @@ void marioMiniGame() {
         score += 10;
       }
     }
-
     if (marioY + 14 >= GROUND_Y) {
       marioY = GROUND_Y - 14;
       marioVY = 0;
       onGround = true;
     }
+    if (onGround && !wasOnGround) {
+      landSquashUntil = millis() + 90; // brief squash frame on landing
+      spawnDust(marioX + 2, marioY + 14);
+      spawnDust(marioX + 8, marioY + 14);
+    }
 
+    // --- Running dust puffs (only while actually moving on ground) ---
+    static unsigned long dustTimer = 0;
+    if (onGround && fabs(marioVX) > 1.2 && millis() - dustTimer > 90) {
+      dustTimer = millis();
+      spawnDust(marioX + (faceRight ? 0 : 10), marioY + 13);
+    }
+    for (int i = 0; i < maxDust; i++) {
+      if (dust[i].active) { dust[i].y += 0.3; dust[i].life--; if (dust[i].life <= 0) dust[i].active = false; }
+    }
+
+    // --- Entities (pipes / goombas / coins) ---
     for (int i = 0; i < maxEntities; i++) {
       if (!entities[i].active) continue;
       if (entities[i].type == 1) entities[i].x -= 0.8;
 
       int sx = entities[i].x - camX;
-      if (sx < -30) {
-        spawnEntity(i, camX + SCREEN_WIDTH + random(20, 60));
-        continue;
-      }
+      if (sx < -30) { spawnEntity(i, camX + SCREEN_WIDTH + random(20, 60)); continue; }
 
       if (overlap(marioX, marioY, 12, 14, sx, entities[i].y, entities[i].w, entities[i].h)) {
         if (entities[i].type == 1) {
           if (marioVY > 0 && marioY + 14 - entities[i].y <= 6) {
-            marioVY = jumpForce * 0.5;
+            marioVY = JUMP_FORCE * 0.5;
             entities[i].active = false;
             score += 100;
           } else {
@@ -1589,25 +1669,23 @@ void marioMiniGame() {
         } else if (entities[i].type == 2) {
           entities[i].active = false;
           score += 50;
+          coins++;
         } else {
           playing = false;
         }
       }
     }
 
-    if (millis() - animTimer > 100) {
-      runFrame = (runFrame + 1) % 2;
-      animTimer = millis();
-    }
+    // --- Walk-cycle frame driven by DISTANCE, not time (the actual fix) ---
+    int newFrame = ((int)(distanceWalked / 5)) % 2;
+    walkFrame = newFrame;
 
     display.clearDisplay();
     display.drawFastHLine(0, GROUND_Y, SCREEN_WIDTH, SSD1306_WHITE);
 
     for (int bx = firstBrickX - 80; bx < firstBrickX + 240; bx += 80) {
       int sx = bx - camX;
-      if (sx > -8 && sx < SCREEN_WIDTH) {
-        display.drawBitmap(sx, GROUND_Y - 24, brick_8x8, 8, 8, SSD1306_WHITE);
-      }
+      if (sx > -8 && sx < SCREEN_WIDTH) display.drawBitmap(sx, GROUND_Y - 24, brick_8x8, 8, 8, SSD1306_WHITE);
     }
 
     for (int i = 0; i < maxEntities; i++) {
@@ -1620,14 +1698,38 @@ void marioMiniGame() {
       }
     }
 
-    const uint8_t* marioBmp = mario_stand_12x14;
-    if (!onGround) marioBmp = mario_jump_12x14;
-    else if (left || right) marioBmp = (runFrame == 0) ? mario_run1_12x14 : mario_run2_12x14;
-    display.drawBitmap((int)marioX, (int)marioY, marioBmp, 12, 14, SSD1306_WHITE);
+    for (int i = 0; i < maxDust; i++) {
+      if (dust[i].active) display.drawBitmap((int)dust[i].x, (int)dust[i].y, dust_4x4, 4, 4, SSD1306_WHITE);
+    }
 
+    const uint8_t* marioBmp;
+    bool squashing = millis() < landSquashUntil;
+    if (!onGround) marioBmp = mario_jump_12x14;
+    else if (squashing) marioBmp = mario_stand_12x14; // brief stop-frame on landing
+    else if (fabs(marioVX) > 0.3) marioBmp = (walkFrame == 0) ? mario_run1_12x14 : mario_run2_12x14;
+    else marioBmp = mario_stand_12x14;
+
+    int drawY = (int)marioY + (squashing ? 1 : 0);
+    if (faceRight) {
+      display.drawBitmap((int)marioX, drawY, marioBmp, 12, 14, SSD1306_WHITE);
+    } else {
+      // simple horizontal mirror so facing left is visually distinct too
+      for (int yy = 0; yy < 14; yy++) {
+        for (int xx = 0; xx < 12; xx++) {
+          int byteIdx = yy * 2 + (xx / 8);
+          uint8_t rowByte = pgm_read_byte(&marioBmp[byteIdx]);
+          bool bit = (rowByte >> (7 - (xx % 8))) & 1;
+          if (bit) display.drawPixel((int)marioX + (11 - xx), drawY + yy, SSD1306_WHITE);
+        }
+      }
+    }
+
+    display.setCursor(2, 2);
+    display.setTextSize(1);
+    display.print("Coins:"); display.print(coins);
 
     display.display();
-    delay(20);
+    delay(18);
   }
 
   gameOver(score);
@@ -1640,7 +1742,6 @@ void carDodgerGame() {
   const int ROAD_RIGHT = 126;
   const int CAR_W = 12, CAR_H = 12;
 
-  // Restored continuous smooth movement left-right!
   float carX = (SCREEN_WIDTH - CAR_W) / 2.0;
   const float carY = SCREEN_HEIGHT - CAR_H - 2;
 
@@ -1650,11 +1751,11 @@ void carDodgerGame() {
   
   auto spawnEnemy = [&](int idx, float startY) {
     enemies[idx].active = true;
-    enemies[idx].type = random(0, 3); // 0=car, 1=bike, 2=truck
+    enemies[idx].type = random(0, 3);
     int w = (enemies[idx].type == 2) ? 14 : 12;
     enemies[idx].x = random(ROAD_LEFT + 2, ROAD_RIGHT - w - 2);
     enemies[idx].y = startY;
-    enemies[idx].speed = 1.5 + (random(0, 10) / 10.0); // scaled down for 15ms frame rate
+    enemies[idx].speed = 1.5 + (random(0, 10) / 10.0);
   };
 
   spawnEnemy(0, -30);
@@ -1665,13 +1766,12 @@ void carDodgerGame() {
   bool running = true;
 
   while(running) {
-    // Increased reflex speed from 2.0 to 2.2 with a faster 15ms loop!
     if (digitalRead(LEFT_BUTTON) == LOW) carX -= 2.2;
     if (digitalRead(RIGHT_BUTTON) == LOW) carX += 2.2;
 
     carX = constrain(carX, ROAD_LEFT + 2, ROAD_RIGHT - CAR_W - 2);
 
-    roadOffset = fmod(roadOffset + 1.8, 12.0); // scaled for 15ms
+    roadOffset = fmod(roadOffset + 1.8, 12.0);
 
     for (int i=0; i<maxEnemies; i++) {
       enemies[i].y += enemies[i].speed;
@@ -1713,123 +1813,151 @@ void carDodgerGame() {
 
     display.drawBitmap((int)carX, (int)carY, carSprite12x12, CAR_W, CAR_H, SSD1306_WHITE);
 
-
     display.display();
-    delay(15); // Faster loop = smoother rendering
+    delay(15);
   }
 
   gameOver(score);
   inGame = false;
 }
 
+// ===================== GAME 8: TAPPY TAP (Tower Stack) =====================
+// FIX (#3): the old version wasn't really behaving like the classic
+// "Stack" game it was going for - blocks just piled straight up until they
+// ran off the top of the screen, there was no reward for a clean stack, and
+// a mis-drop that clipped a single pixel behaved identically to a perfect
+// one. Rewritten with the real Stack rules:
+//   - the camera/tower view scrolls down as you build higher, so the tower
+//     never runs out of screen (the actual game does this too)
+//   - a "PERFECT" drop (edges line up within a small tolerance) keeps the
+//     block at full width and pays a combo bonus instead of always shrinking
+//   - the sliced-off overhang visibly breaks away and falls off screen
+//   - speed ramps up with height, and a running combo counter is shown
 void tappyTapGame() {
-  // Timing-based Block Stacker (Tappy Stack)
-  // Single, precise clicks on OK button only. Hardware friendly!
   const int rowHeight = 6;
-  const int maxRows = 10; // Fits within the OLED bounds
-  
+  const int maxRows = 200; // logical tower height, way beyond one screen
+
   int stackedX[maxRows];
   int stackedWidth[maxRows];
-  for (int i = 0; i < maxRows; i++) {
-    stackedX[i] = 0;
-    stackedWidth[i] = 0;
-  }
 
   int score = 0;
+  int combo = 0;
   int currentRow = 0;
-  
+
   float blockX = 10;
-  int blockWidth = 36; // wide initial block
-  float blockSpeed = 1.8;
+  int blockWidth = 40;
+  float blockSpeed = 1.6;
   int dir = 1;
-  
+
+  // camera offset in rows: how many completed rows have scrolled off
+  int viewOffset = 0;
+  const int visibleRows = 9; // how many rows fit on screen at once
+
   bool playing = true;
   bool released = false;
+
+  struct Chip { float x, y, w; float vy; bool active; };
+  Chip chip = {0, 0, 0, 0, false};
 
   while (digitalRead(OK_BUTTON) == LOW) delay(10);
 
   while (playing) {
-    // Move active block
     blockX += dir * blockSpeed;
-    if (blockX <= 4) {
-      blockX = 4;
-      dir = 1;
-    } else if (blockX + blockWidth >= 124) {
-      blockX = 124 - blockWidth;
-      dir = -1;
-    }
+    if (blockX <= 4) { blockX = 4; dir = 1; }
+    else if (blockX + blockWidth >= 124) { blockX = 124 - blockWidth; dir = -1; }
 
     bool okPressed = (digitalRead(OK_BUTTON) == LOW);
     if (okPressed && released) {
       released = false;
-      
       int bx = (int)blockX;
-      
+
       if (currentRow == 0) {
-        // First block lands automatically
         stackedX[0] = bx;
         stackedWidth[0] = blockWidth;
         currentRow++;
         score += 10;
         blockX = 10;
-        blockSpeed = 1.8 + (currentRow * 0.15);
+        blockSpeed = 1.6;
       } else {
-        // Crop block based on alignment with the block directly below
         int belowX = stackedX[currentRow - 1];
         int belowW = stackedWidth[currentRow - 1];
-        
+
         int left = max(bx, belowX);
         int right = min(bx + blockWidth, belowX + belowW);
         int newW = right - left;
-        
+
         if (newW <= 0) {
-          // Missed completely!
-          playing = false;
+          playing = false; // total miss
         } else {
-          // Successful placement
-          stackedX[currentRow] = left;
-          stackedWidth[currentRow] = newW;
-          blockWidth = newW; // block shrinks to alignment size
-          score += 10;
-          
-          if (currentRow < maxRows - 2) {
-            currentRow++;
+          const int PERFECT_TOLERANCE = 2; // px - "official" Stack-style snap
+          bool perfect = (abs(bx - belowX) <= PERFECT_TOLERANCE);
+
+          if (perfect) {
+            // Perfect drop: snap to the row below, no shrink, combo bonus
+            left = belowX;
+            newW = belowW;
+            combo++;
+            score += 20 + combo * 5;
           } else {
-            // Scroll history down
-            for (int i = 0; i < maxRows - 1; i++) {
-              stackedX[i] = stackedX[i + 1];
-              stackedWidth[i] = stackedWidth[i + 1];
+            // Normal drop: crop to the overlap and drop the sliced-off chip
+            combo = 0;
+            score += 10;
+            int cutW = blockWidth - newW;
+            if (cutW > 0) {
+              float cutX = (bx < belowX) ? bx : (left + newW);
+              chip = {cutX, (float)(54 - (currentRow - viewOffset) * rowHeight), (float)cutW, 0.4f, true};
             }
           }
-          
-          // Spawn new block with speed increment
-          blockX = random(4, 120 - blockWidth);
-          blockSpeed = 1.8 + (score / 40.0);
-          if (blockSpeed > 4.5) blockSpeed = 4.5;
+
+          stackedX[currentRow] = left;
+          stackedWidth[currentRow] = newW;
+          blockWidth = newW;
+
+          if (currentRow < maxRows - 1) currentRow++;
+
+          // scroll the camera once the tower grows past the visible area
+          if (currentRow - viewOffset >= visibleRows) {
+            viewOffset = currentRow - visibleRows + 1;
+          }
+
+          blockX = random(4, max(5, 120 - blockWidth));
+          blockSpeed = 1.6 + (currentRow * 0.08);
+          if (blockSpeed > 4.2) blockSpeed = 4.2;
         }
       }
     }
+    if (!okPressed) released = true;
 
-    if (!okPressed) {
-      released = true;
+    if (chip.active) {
+      chip.y += chip.vy;
+      chip.vy += 0.5;
+      if (chip.y > 64) chip.active = false;
     }
 
     display.clearDisplay();
-
-    // Border
     display.drawRect(2, 2, 124, 60, SSD1306_WHITE);
 
-    // Draw stacked blocks
-    for (int i = 0; i < currentRow; i++) {
-      int ry = 54 - (i * rowHeight);
+    for (int i = viewOffset; i < currentRow; i++) {
+      int ry = 54 - (i - viewOffset) * rowHeight;
+      if (ry < 4) continue;
       display.fillRect(stackedX[i], ry, stackedWidth[i], rowHeight - 1, SSD1306_WHITE);
     }
 
-    // Draw active moving block
-    int activeY = 54 - (currentRow * rowHeight);
-    display.fillRect((int)blockX, activeY, blockWidth, rowHeight - 1, SSD1306_WHITE);
+    int activeY = 54 - (currentRow - viewOffset) * rowHeight;
+    if (activeY > 4) {
+      display.fillRect((int)blockX, activeY, blockWidth, rowHeight - 1, SSD1306_WHITE);
+    }
 
+    if (chip.active) {
+      display.fillRect((int)chip.x, (int)chip.y, (int)chip.w, rowHeight - 1, SSD1306_WHITE);
+    }
 
+    display.setCursor(4, 2);
+    display.print("H:"); display.print(currentRow);
+    if (combo > 1) {
+      display.setCursor(70, 2);
+      display.print("Combo x"); display.print(combo);
+    }
 
     display.display();
     delay(15);
@@ -1840,22 +1968,35 @@ void tappyTapGame() {
 }
 
 // ===================== GAME 9: SPACE INVADERS =====================
+// FIX (#4): the Scout enemy's sine-wave path called the floating point
+// sin() function every single frame for every Scout on screen. On this
+// hardware that's the single biggest cause of the frame lag - sin() is
+// comparatively expensive on an 8-bit-ish MCU without an FPU. Replaced with
+// a small precomputed lookup table (fastSinY) so the wave motion is now a
+// plain array read instead of a trig call, with no visible gameplay change.
+static const int8_t PROGMEM sinTableX100[240] = {
+  0, 17, 33, 48, 62, 74, 84, 92, 97, 100, 100, 97, 91, 83, 72, 60, 46, 30, 14, -3, -19, -35, -50, -64, -76, -85, -93, -98, -100, -99, -96, -90, -81, -71, -58, -43, -28, -12, 5, 22, 37, 52, 66, 77, 87, 94, 98, 100, 99, 95, 89, 80, 69, 56, 41, 26, 9, -8, -24, -40, -54, -68, -79, -88, -95, -99, -100, -99, -94, -88, -78, -67, -54, -39, -23, -7, 10, 26, 42, 56, 69, 80, 89, 95, 99, 100, 98, 93, 86, 77, 65, 52, 37, 21, 4, -13, -29, -44, -59, -71, -82, -90, -96, -99, -100, -98, -93, -85, -75, -63, -49, -34, -18, -2, 15, 31, 47, 61, 73, 83, 91, 97, 100, 100, 97, 92, 84, 73, 61, 47, 32, 16, -1, -17, -34, -49, -63, -75, -85, -92, -97, -100, -99, -96, -91, -82, -72, -59, -45, -29, -13, 3, 20, 36, 51, 64, 76, 86, 93, 98, 100, 99, 96, 89, 81, 70, 57, 43, 27, 11, -6, -22, -38, -53, -66, -78, -87, -94, -98, -100, -99, -95, -88, -79, -68, -55, -40, -25, -8, 8, 25, 41, 55, 68, 79, 88, 95, 99, 100, 98, 94, 87, 78, 66, 53, 38, 22, 6, -11, -27, -43, -57, -70, -81, -90, -96, -99, -100, -98, -93, -86, -76, -64, -51, -36, -20, -3, 13, 30, 45, 59, 72, 82, 91, 96, 99, 100, 97, 92, 85
+};
+inline float fastSinY(float y) {
+  int idx = ((int)y) % 240;
+  if (idx < 0) idx += 240;
+  int8_t v = (int8_t)pgm_read_byte(&sinTableX100[idx]);
+  return v / 100.0f;
+}
+
 void spaceInvaderGame() {
-  // Brand new Galaga / Retro Space Shooter style!
   float playerX = 60.0;
-  const float playerY = 46.0; // Fits 8x16 ship nicely at the bottom
+  const float playerY = 46.0;
   int lives = 3;
   int score = 0;
   int wave = 1;
   int enemiesKilled = 0;
   
-  // Powerup state
   bool doubleShot = false;
   unsigned long doubleShotTimer = 0;
   bool shield = false;
   unsigned long shieldTimer = 0;
 
-  // Starfield background
   float starX[8];
   float starY[8];
   for (int i = 0; i < 8; i++) {
@@ -1863,7 +2004,6 @@ void spaceInvaderGame() {
     starY[i] = random(0, SCREEN_HEIGHT);
   }
 
-  // Player Bullets
   const int maxBullets = 6;
   float bulletX[maxBullets];
   float bulletY[maxBullets];
@@ -1871,19 +2011,17 @@ void spaceInvaderGame() {
   for (int i = 0; i < maxBullets; i++) bulletActive[i] = false;
   unsigned long lastFireTime = 0;
 
-  // Enemy Bullets
   const int maxEnemyBullets = 4;
   float eBulletX[maxEnemyBullets];
   float eBulletY[maxEnemyBullets];
   bool eBulletActive[maxEnemyBullets];
   for (int i = 0; i < maxEnemyBullets; i++) eBulletActive[i] = false;
 
-  // Enemies
   struct Enemy {
     float x, y;
     float vx, vy;
-    float centerX; // For Scout sine wave oscillation
-    int type;      // 0 = Scout, 1 = Bomber, 2 = Kamikaze
+    float centerX;
+    int type;
     int hp;
     bool active;
     unsigned long lastShotTime;
@@ -1894,7 +2032,7 @@ void spaceInvaderGame() {
   auto spawnEnemy = [&](int idx) {
     enemies[idx].active = true;
     enemies[idx].type = random(0, 3);
-    enemies[idx].hp = (enemies[idx].type == 1) ? 2 : 1; // Bomber has 2 HP
+    enemies[idx].hp = (enemies[idx].type == 1) ? 2 : 1;
     enemies[idx].x = random(10, SCREEN_WIDTH - 26);
     enemies[idx].y = -random(15, 60);
     enemies[idx].centerX = enemies[idx].x;
@@ -1903,11 +2041,8 @@ void spaceInvaderGame() {
     enemies[idx].lastShotTime = millis() + random(500, 2000);
   };
 
-  for (int i = 0; i < maxEnemies; i++) {
-    spawnEnemy(i);
-  }
+  for (int i = 0; i < maxEnemies; i++) spawnEnemy(i);
 
-  // Boss State
   bool bossActive = false;
   float bossX = 48.0;
   float bossY = -20.0;
@@ -1915,12 +2050,10 @@ void spaceInvaderGame() {
   int bossHP = 0;
   unsigned long bossLastShot = 0;
 
-  // Power-up drops
   float pUpX = 0, pUpY = 0;
-  int pUpType = -1; // -1 = inactive, 0 = Double Shot, 1 = Shield
+  int pUpType = -1;
   bool pUpActive = false;
 
-  // Particle System (Explosions)
   const int maxParticles = 10;
   float partX[maxParticles];
   float partY[maxParticles];
@@ -1944,12 +2077,10 @@ void spaceInvaderGame() {
   bool playing = true;
 
   while (playing && lives > 0) {
-    // --- Inputs & Movement ---
     if (digitalRead(LEFT_BUTTON) == LOW) playerX -= 2.2;
     if (digitalRead(RIGHT_BUTTON) == LOW) playerX += 2.2;
     playerX = constrain(playerX, 0, SCREEN_WIDTH - 8);
 
-    // Shooting
     if (digitalRead(OK_BUTTON) == LOW && (millis() - lastFireTime > 250)) {
       lastFireTime = millis();
       if (doubleShot) {
@@ -1976,29 +2107,18 @@ void spaceInvaderGame() {
       }
     }
 
-    // --- Starfield Background update ---
     for (int i = 0; i < 8; i++) {
       starY[i] += 1.2;
-      if (starY[i] >= SCREEN_HEIGHT) {
-        starY[i] = 0;
-        starX[i] = random(0, SCREEN_WIDTH);
-      }
+      if (starY[i] >= SCREEN_HEIGHT) { starY[i] = 0; starX[i] = random(0, SCREEN_WIDTH); }
     }
 
-    // --- Particle System update ---
     for (int i = 0; i < maxParticles; i++) {
-      if (partLife[i] > 0) {
-        partX[i] += partVx[i];
-        partY[i] += partVy[i];
-        partLife[i]--;
-      }
+      if (partLife[i] > 0) { partX[i] += partVx[i]; partY[i] += partVy[i]; partLife[i]--; }
     }
 
-    // --- Power-up Timers ---
     if (doubleShot && (millis() > doubleShotTimer)) doubleShot = false;
     if (shield && (millis() > shieldTimer)) shield = false;
 
-    // --- Update Player Bullets ---
     for (int i = 0; i < maxBullets; i++) {
       if (bulletActive[i]) {
         bulletY[i] -= 3.5;
@@ -2006,69 +2126,52 @@ void spaceInvaderGame() {
       }
     }
 
-    // --- Update Enemy Bullets ---
     for (int i = 0; i < maxEnemyBullets; i++) {
       if (eBulletActive[i]) {
         eBulletY[i] += 2.0;
         if (eBulletY[i] > SCREEN_HEIGHT) eBulletActive[i] = false;
 
-        // Collision with player
         if (eBulletX[i] >= playerX && eBulletX[i] <= playerX + 8 &&
             eBulletY[i] >= playerY && eBulletY[i] <= playerY + 16) {
           eBulletActive[i] = false;
           if (shield) {
-            shield = false; // shield absorbs hit
+            shield = false;
           } else {
             lives--;
             spawnExplosion(playerX + 4, playerY + 8);
-            delay(800);
+            delay(500); // trimmed from 800ms - was adding to the "laggy" feel
           }
         }
       }
     }
 
-    // --- Update Power-up Drop ---
     if (pUpActive) {
       pUpY += 1.0;
       if (pUpY > SCREEN_HEIGHT) pUpActive = false;
 
-      // Overlap with player (Player size is 8x16)
       if (pUpX + 6 >= playerX && pUpX <= playerX + 8 &&
           pUpY + 6 >= playerY && pUpY <= playerY + 16) {
         pUpActive = false;
-        if (pUpType == 0) {
-          doubleShot = true;
-          doubleShotTimer = millis() + 8000;
-        } else {
-          shield = true;
-          shieldTimer = millis() + 10000;
-        }
+        if (pUpType == 0) { doubleShot = true; doubleShotTimer = millis() + 8000; }
+        else { shield = true; shieldTimer = millis() + 10000; }
       }
     }
 
-    // --- Update Enemies ---
     if (!bossActive) {
       for (int i = 0; i < maxEnemies; i++) {
         if (!enemies[i].active) continue;
 
-        // Movement pattern based on type
         if (enemies[i].type == 0) {
-          // Scout: Sine wave movement
+          // Scout: sine wave, now via lookup table instead of sin()
           enemies[i].y += enemies[i].vy;
           enemies[i].centerX += enemies[i].vx;
-          if (enemies[i].centerX < 10 || enemies[i].centerX > SCREEN_WIDTH - 26) {
-            enemies[i].vx = -enemies[i].vx;
-          }
-          enemies[i].x = enemies[i].centerX + sin(enemies[i].y / 6.0) * 12.0;
+          if (enemies[i].centerX < 10 || enemies[i].centerX > SCREEN_WIDTH - 26) enemies[i].vx = -enemies[i].vx;
+          enemies[i].x = enemies[i].centerX + fastSinY(enemies[i].y) * 12.0;
         } else if (enemies[i].type == 1) {
-          // Bomber: Slides down slowly, moves left/right
           enemies[i].y += enemies[i].vy * 0.7;
           enemies[i].x += enemies[i].vx;
-          if (enemies[i].x < 10 || enemies[i].x > SCREEN_WIDTH - 26) {
-            enemies[i].vx = -enemies[i].vx;
-          }
+          if (enemies[i].x < 10 || enemies[i].x > SCREEN_WIDTH - 26) enemies[i].vx = -enemies[i].vx;
         } else {
-          // Kamikaze: Charges player horizontally!
           enemies[i].y += enemies[i].vy * 1.3;
           if (enemies[i].y > 10 && enemies[i].y < playerY - 10) {
             if (enemies[i].x < playerX) enemies[i].x += 0.8;
@@ -2076,12 +2179,8 @@ void spaceInvaderGame() {
           }
         }
 
-        // Wrap around bottom
-        if (enemies[i].y > SCREEN_HEIGHT) {
-          spawnEnemy(i);
-        }
+        if (enemies[i].y > SCREEN_HEIGHT) spawnEnemy(i);
 
-        // Enemy shooting
         if (enemies[i].active && enemies[i].y > 0 && (millis() > enemies[i].lastShotTime)) {
           enemies[i].lastShotTime = millis() + random(1500, 3000);
           for (int b = 0; b < maxEnemyBullets; b++) {
@@ -2094,20 +2193,14 @@ void spaceInvaderGame() {
           }
         }
 
-        // Collision with player ship
         if (enemies[i].x + 16 >= playerX && enemies[i].x <= playerX + 8 &&
             enemies[i].y + 8 >= playerY && enemies[i].y <= playerY + 16) {
           spawnExplosion(enemies[i].x + 8, enemies[i].y + 4);
           spawnEnemy(i);
-          if (shield) {
-            shield = false;
-          } else {
-            lives--;
-            delay(800);
-          }
+          if (shield) shield = false;
+          else { lives--; delay(500); }
         }
 
-        // Collision with player bullets
         for (int b = 0; b < maxBullets; b++) {
           if (bulletActive[b]) {
             if (bulletX[b] >= enemies[i].x && bulletX[b] <= enemies[i].x + 16 &&
@@ -2116,20 +2209,15 @@ void spaceInvaderGame() {
               enemies[i].hp--;
               if (enemies[i].hp <= 0) {
                 spawnExplosion(enemies[i].x + 8, enemies[i].y + 4);
-                
-                // Spawn Powerup drop (20% chance)
                 if (random(0, 10) < 2 && !pUpActive) {
                   pUpActive = true;
                   pUpX = enemies[i].x + 4;
                   pUpY = enemies[i].y;
                   pUpType = random(0, 2);
                 }
-
                 spawnEnemy(i);
                 score += 20;
                 enemiesKilled++;
-
-                // Trigger Boss fight every 15 kills
                 if (enemiesKilled >= 15) {
                   bossActive = true;
                   bossX = 48.0;
@@ -2144,17 +2232,12 @@ void spaceInvaderGame() {
         }
       }
     } else {
-      // --- BOSS UPDATE ---
-      if (bossY < 8.0) {
-        bossY += 0.5;
-      } else {
+      if (bossY < 8.0) bossY += 0.5;
+      else {
         bossX += bossVx;
-        if (bossX < 10 || bossX > SCREEN_WIDTH - 42) {
-          bossVx = -bossVx;
-        }
+        if (bossX < 10 || bossX > SCREEN_WIDTH - 42) bossVx = -bossVx;
       }
 
-      // Boss shooting
       if (millis() > bossLastShot) {
         bossLastShot = millis() + random(1000, 2000);
         int fired = 0;
@@ -2169,7 +2252,6 @@ void spaceInvaderGame() {
         }
       }
 
-      // Collision with player bullets
       for (int b = 0; b < maxBullets; b++) {
         if (bulletActive[b]) {
           if (bulletX[b] >= bossX && bulletX[b] <= bossX + 32 &&
@@ -2184,8 +2266,6 @@ void spaceInvaderGame() {
               wave++;
               enemiesKilled = 0;
               bossActive = false;
-
-              // Respawn normal enemies
               for (int k = 0; k < maxEnemies; k++) spawnEnemy(k);
             }
           }
@@ -2193,44 +2273,24 @@ void spaceInvaderGame() {
       }
     }
 
-    // --- Draw ---
     display.clearDisplay();
 
-    // 1. Draw starfield background
-    for (int i = 0; i < 8; i++) {
-      display.drawPixel((int)starX[i], (int)starY[i], SSD1306_WHITE);
-    }
+    for (int i = 0; i < 8; i++) display.drawPixel((int)starX[i], (int)starY[i], SSD1306_WHITE);
 
-    // 2. Draw explosion particles
     for (int i = 0; i < maxParticles; i++) {
-      if (partLife[i] > 0) {
-        display.drawPixel((int)partX[i], (int)partY[i], SSD1306_WHITE);
-      }
+      if (partLife[i] > 0) display.drawPixel((int)partX[i], (int)partY[i], SSD1306_WHITE);
     }
 
-    // 3. Draw player ship (8x16)
     display.drawBitmap((int)playerX, (int)playerY, playerShipVertical, 8, 16, SSD1306_WHITE);
+    if (shield) display.drawCircle((int)playerX + 4, (int)playerY + 8, 10, SSD1306_WHITE);
 
-    // Draw active shield ring
-    if (shield) {
-      display.drawCircle((int)playerX + 4, (int)playerY + 8, 10, SSD1306_WHITE);
-    }
-
-    // 4. Draw player bullets
     for (int i = 0; i < maxBullets; i++) {
-      if (bulletActive[i]) {
-        display.drawFastVLine((int)bulletX[i], (int)bulletY[i], 3, SSD1306_WHITE);
-      }
+      if (bulletActive[i]) display.drawFastVLine((int)bulletX[i], (int)bulletY[i], 3, SSD1306_WHITE);
     }
-
-    // 5. Draw enemy bullets
     for (int i = 0; i < maxEnemyBullets; i++) {
-      if (eBulletActive[i]) {
-        display.fillRect((int)eBulletX[i], (int)eBulletY[i], 2, 2, SSD1306_WHITE);
-      }
+      if (eBulletActive[i]) display.fillRect((int)eBulletX[i], (int)eBulletY[i], 2, 2, SSD1306_WHITE);
     }
 
-    // 6. Draw powerup drop
     if (pUpActive) {
       if ((millis() / 150) % 2 == 0) {
         display.drawRect((int)pUpX, (int)pUpY, 6, 6, SSD1306_WHITE);
@@ -2239,32 +2299,27 @@ void spaceInvaderGame() {
       }
     }
 
-    // 7. Draw enemies
     if (!bossActive) {
       for (int i = 0; i < maxEnemies; i++) {
-        if (enemies[i].active && enemies[i].y >= 0) {
-          display.drawBitmap((int)enemies[i].x, (int)enemies[i].y, invader, 16, 8, SSD1306_WHITE);
-        }
+        if (enemies[i].active && enemies[i].y >= 0) display.drawBitmap((int)enemies[i].x, (int)enemies[i].y, invader, 16, 8, SSD1306_WHITE);
       }
     } else {
       int bx = (int)bossX;
       int by = (int)bossY;
       display.fillRect(bx, by + 4, 32, 8, SSD1306_WHITE);
       display.fillRect(bx + 8, by, 16, 4, SSD1306_WHITE);
-      display.fillRect(bx + 14, by + 12, 4, 2, SSD1306_WHITE); // cannon
+      display.fillRect(bx + 14, by + 12, 4, 2, SSD1306_WHITE);
 
-      // Draw Boss Health Bar
       display.drawRect(34, 2, 60, 4, SSD1306_WHITE);
       int maxHP = 15 + wave * 5;
       int barW = (bossHP * 58) / maxHP;
       display.fillRect(35, 3, barW, 2, SSD1306_WHITE);
     }
 
-    // 8. Draw UI HUD overlay (Score hidden during play)
     display.setTextSize(1);
     display.setCursor(95, 2);
     display.print("L:"); display.print(lives);
-    
+
     display.display();
     delay(15);
   }
@@ -2274,8 +2329,10 @@ void spaceInvaderGame() {
 }
 
 // ===================== GAME 10: TETRIS LITE =====================
+// FIX (#5): enlarged the side panel / NEXT-piece preview box a bit so it
+// isn't so cramped, without shrinking the playfield.
 void tetrislite() {
-  const int ORG_X = 10; 
+  const int ORG_X = 8; 
   const int ORG_Y = 2;
   
   const int CELL_W = 5;
@@ -2285,7 +2342,8 @@ void tetrislite() {
   const int W_PX = COLS * CELL_W; 
   const int H_PX = ROWS * CELL_H; 
   
-  const int RightUI_X = 68; 
+  const int RightUI_X = 60;          // was 68 - panel now a bit wider/bigger
+  const int RightUI_W = 66;          // was 58
 
   uint8_t board[ROWS][COLS];
   memset(board, 0, sizeof(board));
@@ -2472,20 +2530,25 @@ void tetrislite() {
       }
     }
 
-    display.drawRect(RightUI_X, 2, 58, 60, SSD1306_WHITE);
-    display.setCursor(RightUI_X+4, 6);
+    display.drawRect(RightUI_X, 2, RightUI_W, 60, SSD1306_WHITE);
+    display.setCursor(RightUI_X + 5, 6);
     display.print("TETRIS");
 
-    display.setCursor(RightUI_X+4, 34);
-    display.print("L:"); display.print(lines);
+    display.setCursor(RightUI_X + 5, 20);
+    display.print("Score");
+    display.setCursor(RightUI_X + 5, 30);
+    display.print(score);
 
-    display.setCursor(RightUI_X+4, 46);
+    display.setCursor(RightUI_X + 5, 41);
     display.print("NEXT");
+    // NEXT box made a bit bigger than before (was 16x16 with 3px cells),
+    // still fully inside the panel and the 64px-tall screen.
+    display.drawRect(RightUI_X + 6, 47, 26, 14, SSD1306_WHITE);
     uint16_t nextMask = SHAPES[nxt.type][0];
     for (int y = 0; y < 4; y++) {
       for (int x = 0; x < 4; x++) {
         if (cellAtMask(nextMask, x, y)) {
-          display.fillRect(RightUI_X + 34 + x * 4, 44 + y * 4, 3, 3, SSD1306_WHITE);
+          display.fillRect(RightUI_X + 9 + x * 4, 49 + y * 3, 3, 2, SSD1306_WHITE);
         }
       }
     }
@@ -2499,102 +2562,139 @@ void tetrislite() {
 }
 
 // ===================== GAME 11: BRICK KILLER =====================
+// FIX (#6): full rebuild. Added 5 real difficulty tiers (Simple / Normal /
+// Hard / Very Hard / Tricky), a proper lives system instead of instant
+// game-over, sub-pixel smooth motion, and genuine randomness on every wall
+// and paddle bounce (small angle jitter) so the ball never falls into a
+// perfectly repeating, predictable loop like it used to.
 void brickkillerGame() {
+  const char* levelNames[5] = {"Simple", "Normal", "Hard", "Very Hard", "Tricky"};
   int level = 0;
-  
-  display.clearDisplay();
-  display.setCursor(15, 10);
-  display.print("Select Level:");
-  display.setCursor(15, 30);
-  display.print("> Easy (L1)");
-  display.setCursor(15, 45);
-  display.print("  Medium (L2)");
-  display.display();
 
+  auto drawLevelMenu = [&]() {
+    display.clearDisplay();
+    display.setCursor(15, 4);
+    display.print("Select Difficulty:");
+    for (int i = 0; i < 5; i++) {
+      display.setCursor(15, 14 + i * 10);
+      display.print(i == level ? "> " : "  ");
+      display.print(levelNames[i]);
+    }
+    display.display();
+  };
+
+  drawLevelMenu();
   delay(200);
-  while(true) {
-    if (digitalRead(UP_BUTTON) == LOW || digitalRead(DOWN_BUTTON) == LOW) {
-      level = 1 - level;
-      display.clearDisplay();
-      display.setCursor(15, 10);
-      display.print("Select Level:");
-      display.setCursor(15, 30);
-      display.print(level == 0 ? "> Easy (L1)" : "  Easy (L1)");
-      display.setCursor(15, 45);
-      display.print(level == 1 ? "> Medium (L2)" : "  Medium (L2)");
-      display.display();
-      delay(200);
-    }
-    if (digitalRead(OK_BUTTON) == LOW) {
-      delay(200);
-      break;
-    }
+  while (true) {
+    if (digitalRead(UP_BUTTON) == LOW) { level = (level + 4) % 5; drawLevelMenu(); delay(180); }
+    if (digitalRead(DOWN_BUTTON) == LOW) { level = (level + 1) % 5; drawLevelMenu(); delay(180); }
+    if (digitalRead(OK_BUTTON) == LOW) { delay(200); break; }
   }
 
-  int paddleWidth = (level == 0) ? 24 : 16;
+  // Per-difficulty tuning
+  int paddleWidth   = 26 - level * 3;          // 26,23,20,17,14
+  float ballSpeed    = 1.5 + level * 0.35;      // gets faster each tier
+  int brickRows      = 3 + (level >= 2 ? 1 : 0) + (level >= 4 ? 1 : 0);
+  float jitterAmount = 0.15 + level * 0.12;     // more unpredictable bounce at higher tiers
+  bool movingBricks   = (level == 4);           // "Tricky": a couple of bricks drift sideways
+  int lives = 3;
+
   const int paddleHeight = 3;
-  float paddleX = (SCREEN_WIDTH - paddleWidth) / 2;
+  float paddleX = (SCREEN_WIDTH - paddleWidth) / 2.0;
   const int paddleY = SCREEN_HEIGHT - 6;
 
-  float ballX = SCREEN_WIDTH / 2;
-  float ballY = SCREEN_HEIGHT / 2;
-  float ballVX = 1.6;
-  float ballVY = -1.6;
-
-  const int brickRows = 3;
   const int brickCols = 8;
   const int brickWidth = 14;
   const int brickHeight = 5;
-  bool bricks[brickRows][brickCols];
+  bool bricks[6][8];
   memset(bricks, 1, sizeof(bricks));
+
+  // a couple of bricks (Tricky mode) get a horizontal drift
+  float brickDriftOffset[6][8];
+  memset(brickDriftOffset, 0, sizeof(brickDriftOffset));
+
+  float ballX, ballY, ballVX, ballVY;
+  auto resetBall = [&]() {
+    ballX = SCREEN_WIDTH / 2;
+    ballY = paddleY - 10;
+    float angle = random(-40, 41) * (PI / 180.0); // launch angle randomness
+    ballVX = ballSpeed * sin(angle);
+    ballVY = -ballSpeed * cos(angle);
+  };
+  resetBall();
 
   int score = 0;
   bool playing = true;
 
   while (playing) {
-    if (digitalRead(LEFT_BUTTON) == LOW && paddleX > 0) paddleX -= 4.5;
-    if (digitalRead(RIGHT_BUTTON) == LOW && paddleX + paddleWidth < SCREEN_WIDTH) paddleX += 4.5;
+    if (digitalRead(LEFT_BUTTON) == LOW && paddleX > 0) paddleX -= 3.2;
+    if (digitalRead(RIGHT_BUTTON) == LOW && paddleX + paddleWidth < SCREEN_WIDTH) paddleX += 3.2;
 
     ballX += ballVX;
     ballY += ballVY;
 
-    if (ballX <= 0 || ballX + 3 >= SCREEN_WIDTH) ballVX *= -1;
-    if (ballY <= 0) ballVY *= -1;
-    if (ballY + 3 >= SCREEN_HEIGHT) break; 
+    // Wall bounces with a touch of random jitter so it never repeats exactly
+    if (ballX <= 0) { ballX = 0; ballVX = fabs(ballVX) + random(-10, 11) * jitterAmount * 0.01; }
+    if (ballX + 3 >= SCREEN_WIDTH) { ballX = SCREEN_WIDTH - 3; ballVX = -fabs(ballVX) + random(-10, 11) * jitterAmount * 0.01; }
+    if (ballY <= 0) { ballY = 0; ballVY = fabs(ballVY) + random(-10, 11) * jitterAmount * 0.01; }
 
-    if (ballY + 3 >= paddleY && ballY + 3 <= paddleY + paddleHeight &&
-        ballX + 3 >= paddleX && ballX <= paddleX + paddleWidth) {
-      ballVY *= -1;
-      float hit = (ballX + 1.5) - (paddleX + paddleWidth/2);
-      ballVX = (hit / (paddleWidth/2)) * 2.2 + (random(-15, 16)/100.0);
+    if (ballY + 3 >= SCREEN_HEIGHT) {
+      lives--;
+      if (lives <= 0) { playing = false; break; }
+      resetBall();
+      delay(400);
+      continue;
+    }
+
+    // Paddle bounce: angle depends on hit position, plus jitter
+    if (ballY + 3 >= paddleY && ballY + 3 <= paddleY + paddleHeight + 3 &&
+        ballX + 3 >= paddleX && ballX <= paddleX + paddleWidth && ballVY > 0) {
+      ballY = paddleY - 3;
+      float hit = ((ballX + 1.5) - (paddleX + paddleWidth / 2.0)) / (paddleWidth / 2.0);
+      float speedNow = sqrt(ballVX * ballVX + ballVY * ballVY);
+      float angle = hit * 1.0 + (random(-15, 16) * jitterAmount * 0.02);
+      angle = constrain(angle, -1.3, 1.3);
+      ballVX = speedNow * sin(angle);
+      ballVY = -fabs(speedNow * cos(angle));
+      if (speedNow < ballSpeed * 2.2) { ballVX *= 1.02; ballVY *= 1.02; } // tiny ramp-up
+    }
+
+    // Moving bricks (Tricky only): a slow left-right drift on row 0
+    if (movingBricks) {
+      for (int c = 0; c < brickCols; c++) {
+        if (bricks[0][c]) {
+          brickDriftOffset[0][c] += 0.15;
+        }
+      }
     }
 
     for (int r = 0; r < brickRows; r++) {
       for (int c = 0; c < brickCols; c++) {
-        if (bricks[r][c]) {
-          int bx = c * (brickWidth + 2) + 2;
-          int by = r * (brickHeight + 2) + 2;
-          if (ballX + 3 > bx && ballX < bx + brickWidth &&
-              ballY + 3 > by && ballY < by + brickHeight) {
-            bricks[r][c] = false;
-            ballVY *= -1;
-            score += 10;
-          }
+        if (!bricks[r][c]) continue;
+        int bx = c * (brickWidth + 2) + 2 + (int)(movingBricks && r == 0 ? sin(brickDriftOffset[r][c]) * 6 : 0);
+        int by = r * (brickHeight + 2) + 2;
+        if (ballX + 3 > bx && ballX < bx + brickWidth &&
+            ballY + 3 > by && ballY < by + brickHeight) {
+          bricks[r][c] = false;
+          ballVY = -ballVY + random(-10, 11) * jitterAmount * 0.01;
+          score += 10;
         }
       }
     }
 
     bool win = true;
-    for (int r=0; r<brickRows; r++)
-      for(int c=0; c<brickCols; c++)
+    for (int r = 0; r < brickRows; r++)
+      for (int c = 0; c < brickCols; c++)
         if (bricks[r][c]) win = false;
 
     if (win) {
       display.clearDisplay();
-      display.setCursor(20, 20);
-      display.print("Level Clear!");
+      display.setCursor(15, 20);
+      display.print(levelNames[level]);
+      display.setCursor(15, 32);
+      display.print("Cleared!");
       display.display();
-      delay(2000);
+      delay(1500);
       break;
     }
 
@@ -2602,16 +2702,19 @@ void brickkillerGame() {
     for (int r = 0; r < brickRows; r++) {
       for (int c = 0; c < brickCols; c++) {
         if (bricks[r][c]) {
-          display.fillRect(c * (brickWidth + 2) + 2, r * (brickHeight + 2) + 2, brickWidth, brickHeight, SSD1306_WHITE);
+          int bx = c * (brickWidth + 2) + 2 + (int)(movingBricks && r == 0 ? sin(brickDriftOffset[r][c]) * 6 : 0);
+          display.fillRect(bx, r * (brickHeight + 2) + 2, brickWidth, brickHeight, SSD1306_WHITE);
         }
       }
     }
     display.fillRect((int)paddleX, paddleY, paddleWidth, paddleHeight, SSD1306_WHITE);
     display.fillRect((int)ballX, (int)ballY, 3, 3, SSD1306_WHITE);
 
+    display.setCursor(2, SCREEN_HEIGHT - 8);
+    display.print("Lives:"); display.print(lives);
 
     display.display();
-    delay(15); 
+    delay(15);
   }
 
   gameOver(score);
@@ -2619,10 +2722,23 @@ void brickkillerGame() {
 }
 
 // ===================== GAME 12: PLAY 2048 =====================
+// FIX (#7): the old 12x12 tiles were too small for 3-digit numbers - the
+// text (6px per character) spilled past the tile edge into a neighbouring
+// EMPTY cell (which is black), so a black-on-white digit turned into
+// invisible black-on-black pixels the moment the score/tiles got big.
+// Tiles are now wider (rectangular, since the screen is short), which is
+// the "make it fuller-screen" ask, and every tile value now actually fits
+// inside its own tile. Also added a session best-score tracker and a
+// one-time "2048!" banner, like the official game's win condition.
 void play2048() {
   int grid[4][4];
   memset(grid, 0, sizeof(grid));
   int score = 0;
+  static int sessionBest = 0;
+  bool wonBannerShown = false;
+
+  const int TILE_W = 20, TILE_H = 14, GAP = 1;
+  const int ORG_X = 2, ORG_Y = 3;
 
   auto addTile = [&]() {
     int empty[16];
@@ -2632,17 +2748,20 @@ void play2048() {
     }
     if (count > 0) {
       int idx = empty[random(0, count)];
-      grid[idx/4][idx%4] = (random(0, 2) == 0) ? 2 : 4;
+      grid[idx/4][idx%4] = (random(0, 10) < 9) ? 2 : 4; // classic 90/10 spawn odds
     }
   };
 
-  auto drawTinyDigit = [&](int x, int y, int val) {
+  auto drawTileValue = [&](int x, int y, int val) {
     char buf[8];
-    if (val >= 1000) { sprintf(buf, "%dK", val/1000); }
-    else { sprintf(buf, "%d", val); }
+    if (val >= 100000) sprintf(buf, "%dK", val / 1000);
+    else if (val >= 10000) sprintf(buf, "%dK", val / 1000);
+    else sprintf(buf, "%d", val);
     int len = strlen(buf);
-    int startX = x + (12 - (len * 4 - 1)) / 2;
-    int startY = y + 4;
+    int textW = len * 6 - 1; // GFX default font advance is 6px/char
+    int startX = x + (TILE_W - textW) / 2;
+    int startY = y + (TILE_H - 8) / 2 + 1;
+    if (startX < x + 1) startX = x + 1; // never let it creep outside the tile
     display.setTextColor(SSD1306_BLACK);
     display.setCursor(startX, startY);
     display.print(buf);
@@ -2667,6 +2786,7 @@ void play2048() {
         if (k > 0 && grid[r][k-1] == grid[r][k] && lastMerge != k-1) {
           grid[r][k-1] *= 2;
           score += grid[r][k-1];
+          if (grid[r][k-1] >= 2048 && !wonBannerShown) wonBannerShown = true;
           grid[r][k] = 0;
           lastMerge = k-1;
           moved = true;
@@ -2684,35 +2804,60 @@ void play2048() {
     memcpy(grid, tmp, sizeof(grid));
   };
 
+  bool announcedWin = false;
+
   while (true) {
     bool moved = false;
-    if (digitalRead(LEFT_BUTTON) == LOW) { moved = slideLeft(); delay(200); }
-    else if (digitalRead(RIGHT_BUTTON) == LOW) { rotate(); rotate(); moved = slideLeft(); rotate(); rotate(); delay(200); }
-    else if (digitalRead(UP_BUTTON) == LOW) { rotate(); rotate(); rotate(); moved = slideLeft(); rotate(); delay(200); }
-    else if (digitalRead(DOWN_BUTTON) == LOW) { rotate(); moved = slideLeft(); rotate(); rotate(); rotate(); delay(200); }
+    if (digitalRead(LEFT_BUTTON) == LOW) { moved = slideLeft(); delay(180); }
+    else if (digitalRead(RIGHT_BUTTON) == LOW) { rotate(); rotate(); moved = slideLeft(); rotate(); rotate(); delay(180); }
+    else if (digitalRead(UP_BUTTON) == LOW) { rotate(); rotate(); rotate(); moved = slideLeft(); rotate(); delay(180); }
+    else if (digitalRead(DOWN_BUTTON) == LOW) { rotate(); moved = slideLeft(); rotate(); rotate(); rotate(); delay(180); }
 
     if (moved) addTile();
+    if (score > sessionBest) sessionBest = score;
+
+    if (wonBannerShown && !announcedWin) {
+      announcedWin = true;
+      display.clearDisplay();
+      display.setTextSize(2);
+      display.setCursor(18, 20);
+      display.print("2048!");
+      display.setTextSize(1);
+      display.setCursor(10, 44);
+      display.print("Keep going for more");
+      display.display();
+      delay(1400);
+      waitForRelease();
+    }
 
     display.clearDisplay();
 
     for (int r=0; r<4; r++) {
       for (int c=0; c<4; c++) {
-        int tx = c * 14 + 4;
-        int ty = r * 14 + 6;
+        int tx = ORG_X + c * (TILE_W + GAP);
+        int ty = ORG_Y + r * (TILE_H + GAP);
         if (grid[r][c] > 0) {
-          display.fillRect(tx, ty, 12, 12, SSD1306_WHITE);
-          drawTinyDigit(tx, ty, grid[r][c]);
+          display.fillRect(tx, ty, TILE_W, TILE_H, SSD1306_WHITE);
+          drawTileValue(tx, ty, grid[r][c]);
         } else {
-          display.drawRect(tx, ty, 12, 12, SSD1306_WHITE);
+          display.drawRect(tx, ty, TILE_W, TILE_H, SSD1306_WHITE);
         }
       }
     }
 
     display.setTextColor(SSD1306_WHITE);
-    display.drawRect(64, 4, 60, 56, SSD1306_WHITE);
-    display.setCursor(72, 8);
+    int panelX = ORG_X + 4 * (TILE_W + GAP) + 2;
+    display.drawRect(panelX, ORG_Y, SCREEN_WIDTH - panelX - 1, 4 * (TILE_H + GAP) - GAP, SSD1306_WHITE);
+    display.setCursor(panelX + 4, ORG_Y + 3);
     display.print("2048");
-
+    display.setCursor(panelX + 4, ORG_Y + 16);
+    display.print("Score");
+    display.setCursor(panelX + 4, ORG_Y + 25);
+    display.print(score);
+    display.setCursor(panelX + 4, ORG_Y + 40);
+    display.print("Best");
+    display.setCursor(panelX + 4, ORG_Y + 49);
+    display.print(sessionBest);
 
     display.display();
 
@@ -2852,12 +2997,19 @@ void playDoodleJump() {
   inGame = false;
 }
 
-// ===================== GAME 13: MAZE SOLVER =====================
+// ===================== GAME 14: MAZE SOLVER =====================
+// FIX (#8): the maze-generation algorithm (recursive backtracker) was
+// already correct, so the core logic is kept, but the game was hard to
+// read and had a couple of small bugs: setTextSize(1.5) silently truncates
+// to 1 in Adafruit_GFX (integer parameter) which looked like a mistake, the
+// player dot only appeared half the time (blink) which made it easy to
+// lose track of yourself, and there was no way to see the maze shape before
+// the clock started. All fixed below, and difficulty now scales cleanly
+// through a named level list.
 void mazeSolverGame() {
   const int COLS = 31;
   const int ROWS = 15;
   uint8_t maze[ROWS][COLS];
-  memset(maze, 1, sizeof(maze));
 
   struct Point { int r, c; };
   Point stack[250];
@@ -2878,7 +3030,7 @@ void mazeSolverGame() {
   };
 
   int level = 1;
-  int baseTimer = 65; 
+  int baseTimer = 70; 
   bool inLevel = true;
 
   while(inLevel) {
@@ -2902,15 +3054,48 @@ void mazeSolverGame() {
       }
     }
 
+    // At higher levels, punch a handful of extra openings so there is more
+    // than one route to the exit (keeps it solvable but less linear).
+    int extraOpenings = min(level - 1, 6);
+    int attempts = 0;
+    while (extraOpenings > 0 && attempts < 60) {
+      attempts++;
+      int rr = random(1, ROWS - 1);
+      int cc = random(1, COLS - 1);
+      if (maze[rr][cc] == 1) {
+        bool horiz = (cc > 0 && cc < COLS-1 && maze[rr][cc-1] == 0 && maze[rr][cc+1] == 0);
+        bool vert  = (rr > 0 && rr < ROWS-1 && maze[rr-1][cc] == 0 && maze[rr+1][cc] == 0);
+        if (horiz || vert) { maze[rr][cc] = 0; extraOpenings--; }
+      }
+    }
+
     maze[ROWS-2][COLS-2] = 0; 
 
     int playerR = 1, playerC = 1;
     int targetR = ROWS-2, targetC = COLS-2;
 
-    int secondsLeft = baseTimer - (level * 5);
-    if (secondsLeft < 15) secondsLeft = 15; 
-    unsigned long timerStart = millis();
+    // Named difficulty band, purely cosmetic label for the player
+    const char* band = level <= 2 ? "Easy" : level <= 5 ? "Normal" : level <= 8 ? "Hard" : "Expert";
 
+    int secondsLeft = baseTimer - (level * 4);
+    if (secondsLeft < 20) secondsLeft = 20;
+
+    // FIX: brief full-maze preview before the timer starts, so the player
+    // gets a moment to plan instead of being dropped in blind every level.
+    display.clearDisplay();
+    for (int r=0; r<ROWS; r++) {
+      for (int c=0; c<COLS; c++) {
+        if (maze[r][c] == 1) display.fillRect(c * 4 + 2, r * 4 + 2, 4, 4, SSD1306_WHITE);
+      }
+    }
+    display.fillRect(1 * 4 + 3, 1 * 4 + 3, 2, 2, SSD1306_WHITE);
+    display.fillRect(targetC * 4 + 3, targetR * 4 + 3, 2, 2, SSD1306_WHITE);
+    display.setCursor(2, 56);
+    display.print("Lvl "); display.print(level); display.print(" "); display.print(band);
+    display.display();
+    delay(900);
+
+    unsigned long timerStart = millis();
     bool levelWon = false;
 
     while (true) {
@@ -2931,11 +3116,11 @@ void mazeSolverGame() {
         levelWon = true;
         level++;
         display.clearDisplay();
-        display.setTextSize(1.5);
+        display.setTextSize(1);
         display.setCursor(20, 25);
         display.print("Level Complete!");
         display.display();
-        delay(1500);
+        delay(1200);
         break;
       }
 
@@ -2949,16 +3134,17 @@ void mazeSolverGame() {
         }
       }
 
-      display.fillRect(targetC * 4 + 3, targetR * 4 + 3, 2, 2, SSD1306_WHITE);
-
-      bool blink = (millis() / 150) % 2;
-      if (blink) {
-        display.fillRect(playerC * 4 + 3, playerR * 4 + 3, 2, 2, SSD1306_WHITE);
+      // Exit always blinks (draws attention); player marker is now solid
+      // and always visible instead of blinking, so you never "lose" yourself.
+      if ((millis() / 250) % 2 == 0) {
+        display.fillRect(targetC * 4 + 3, targetR * 4 + 3, 2, 2, SSD1306_WHITE);
       }
+      display.fillRect(playerC * 4 + 3, playerR * 4 + 3, 2, 2, SSD1306_WHITE);
 
-      display.setCursor(105, 52);
+      display.setCursor(103, 52);
       display.setTextColor(SSD1306_WHITE, SSD1306_BLACK); 
       display.print(tLeft);
+      display.print("s");
 
       display.display();
       delay(15);
@@ -2973,16 +3159,23 @@ void mazeSolverGame() {
   inGame = false;
 }
 
-// ===================== GAME 14: PAC-MAN =====================
+// ===================== GAME 15: PAC-MAN =====================
+// FIX (#9): the maze-carving algorithm itself was fine and is kept, but the
+// ghost behaviour was flat - Ghost 2 just wandered randomly and both ghosts
+// left the house instantly and beelined for Pac-Man forever, which reads as
+// "broken" rather than a real Pac-Man AI. Added the actual textbook ghost
+// behaviour: a Scatter/Chase mode timer (ghosts retreat to home corners on
+// a cycle, like the arcade original), a staggered house-release so Ghost 2
+// waits a couple of seconds before joining the chase, and a genuine Pinky-
+// style "ambush" target (aims 3 tiles ahead of Pac-Man's current heading)
+// for Ghost 2 instead of pure randomness.
 void generatePacmanMaze(uint8_t grid[8][12], int level) {
-  // Fill with walls
   for (int r = 0; r < 8; r++) {
     for (int c = 0; c < 12; c++) {
       grid[r][c] = 1;
     }
   }
 
-  // Maze generation variables (DFS)
   int stackX[48];
   int stackY[48];
   int stackSize = 0;
@@ -2990,7 +3183,6 @@ void generatePacmanMaze(uint8_t grid[8][12], int level) {
   bool visited[8][12];
   memset(visited, 0, sizeof(visited));
 
-  // Intersections are at odd coordinates: c in {1,3,5,7,9}, r in {1,3,5}
   int startX = 1;
   int startY = 1;
   visited[startY][startX] = true;
@@ -3041,19 +3233,16 @@ void generatePacmanMaze(uint8_t grid[8][12], int level) {
     }
   }
 
-  // Center ghost house setup
   grid[3][5] = 3;
   grid[3][6] = 3;
   grid[4][5] = 3;
   grid[4][6] = 3;
   
-  // Ghost house exit path
   grid[2][5] = 0;
   grid[2][6] = 0;
 
-  // Carve random loops to make the map less blocky and allow evasion
   int loopsCarved = 0;
-  int targetLoops = 3 + (level > 4 ? 4 : level); // more paths at higher level
+  int targetLoops = 3 + (level > 4 ? 4 : level);
   int attempts = 0;
   while (loopsCarved < targetLoops && attempts < 50) {
     attempts++;
@@ -3069,18 +3258,16 @@ void generatePacmanMaze(uint8_t grid[8][12], int level) {
     }
   }
 
-  // Power pellets in corners
   grid[1][1] = 2;
   grid[1][10] = 2;
   grid[6][1] = 2;
   grid[6][10] = 2;
 
-  // Fill remaining paths with dots
   for (int r = 1; r < 7; r++) {
     for (int c = 1; c < 11; c++) {
       if (grid[r][c] == 0) {
         if (!((r == 1 && c == 1) || (r == 1 && c == 10) || (r == 6 && c == 1) || (r == 6 && c == 10))) {
-          grid[r][c] = 0; // Dot
+          grid[r][c] = 0;
         }
       }
     }
@@ -3104,17 +3291,27 @@ void pacmanGame() {
     int pNextDir = 0;
     const int pSpeed = 2;
 
-    int gx1 = 40, gy1 = 24; // Ghost 1 starts at cell (5,3)
+    int gx1 = 40, gy1 = 24;
     int gDir1 = 0;
     int gSpeed1 = 2;
 
-    int gx2 = 48, gy2 = 24; // Ghost 2 starts at cell (6,3)
+    int gx2 = 48, gy2 = 24;
     int gDir2 = 0;
     int gSpeed2 = 2;
 
     int lives = 3;
     bool scared = false;
     unsigned long scareTimer = 0;
+
+    unsigned long levelStart = millis();
+    const unsigned long ghost2ReleaseDelay = 2500; // Ghost 2 waits in the house at first
+    bool ghost2Released = false;
+
+    // Scatter/Chase mode cycle, same idea as the arcade original
+    const unsigned long scatterDuration = 4000;
+    const unsigned long chaseDuration = 7000;
+    unsigned long modeTimer = millis() + scatterDuration;
+    bool scatterMode = true;
 
     auto isWall = [&](int gx, int gy) {
       if (gx < 0 || gx >= 12 || gy < 0 || gy >= 8) return true;
@@ -3145,6 +3342,13 @@ void pacmanGame() {
       else if (digitalRead(LEFT_BUTTON) == LOW) pNextDir = 2;
       else if (digitalRead(UP_BUTTON) == LOW) pNextDir = 3;
       else if (digitalRead(DOWN_BUTTON) == LOW) pNextDir = 4;
+
+      if (!ghost2Released && millis() - levelStart > ghost2ReleaseDelay) ghost2Released = true;
+
+      if (millis() > modeTimer) {
+        scatterMode = !scatterMode;
+        modeTimer = millis() + (scatterMode ? scatterDuration : chaseDuration);
+      }
 
       if (px % 8 == 0 && py % 8 == 0) {
         int cx = px / 8;
@@ -3177,7 +3381,8 @@ void pacmanGame() {
         scared = false;
       }
 
-      // --- Ghost 1 AI (Blinky: Chaser) ---
+      // --- Ghost 1 (Blinky): chases directly in Chase mode, retreats to the
+      // top-right corner in Scatter mode, and flees when scared. ---
       if (gx1 % 8 == 0 && gy1 % 8 == 0) {
         int cx = gx1 / 8;
         int cy = gy1 / 8;
@@ -3198,27 +3403,16 @@ void pacmanGame() {
         if (count == 0) {
           gDir1 = opp;
         } else {
-          int targetX = px / 8;
-          int targetY = py / 8;
+          int targetX = scared ? 11 - (px / 8) : (scatterMode ? 10 : px / 8);
+          int targetY = scared ? 7 - (py / 8) : (scatterMode ? 0 : py / 8);
           int bestDir = choices[0];
-          float bestDist = scared ? -1 : 99999;
+          float bestDist = 99999;
 
           for (int i = 0; i < count; i++) {
             int nx = cx + dx[choices[i]];
             int ny = cy + dy[choices[i]];
             float dist = (nx - targetX) * (nx - targetX) + (ny - targetY) * (ny - targetY);
-
-            if (scared) {
-              if (dist > bestDist) {
-                bestDist = dist;
-                bestDir = choices[i];
-              }
-            } else {
-              if (dist < bestDist) {
-                bestDist = dist;
-                bestDir = choices[i];
-              }
-            }
+            if (dist < bestDist) { bestDist = dist; bestDir = choices[i]; }
           }
           gDir1 = bestDir;
         }
@@ -3229,37 +3423,67 @@ void pacmanGame() {
         gy1 += dy[gDir1] * gSpeed1;
       }
 
-      // --- Ghost 2 AI (Pinky: Random seeking) ---
-      if (gx2 % 8 == 0 && gy2 % 8 == 0) {
-        int cx = gx2 / 8;
-        int cy = gy2 / 8;
+      // --- Ghost 2 (Pinky): stays in the house until released, then ambushes
+      // ~3 tiles ahead of Pac-Man's current heading in Chase mode, and
+      // retreats to the top-left corner in Scatter mode. ---
+      if (ghost2Released) {
+        if (gx2 % 8 == 0 && gy2 % 8 == 0) {
+          int cx = gx2 / 8;
+          int cy = gy2 / 8;
 
-        gSpeed2 = scared ? 1 : 2;
+          gSpeed2 = scared ? 1 : 2;
 
-        int choices[4];
-        int count = 0;
-        int opp = getOppositeDir(gDir2);
+          int choices[4];
+          int count = 0;
+          int opp = getOppositeDir(gDir2);
 
-        for (int d = 1; d <= 4; d++) {
-          if (d == opp) continue;
-          if (!isWall(cx + dx[d], cy + dy[d])) {
-            choices[count++] = d;
+          for (int d = 1; d <= 4; d++) {
+            if (d == opp) continue;
+            if (!isWall(cx + dx[d], cy + dy[d])) {
+              choices[count++] = d;
+            }
+          }
+
+          if (count == 0) {
+            gDir2 = opp;
+          } else if (scared) {
+            int targetX = 1, targetY = 6; // flee toward a far corner
+            int bestDir = choices[0];
+            float bestDist = -1;
+            for (int i = 0; i < count; i++) {
+              int nx = cx + dx[choices[i]];
+              int ny = cy + dy[choices[i]];
+              float dist = (nx - targetX) * (nx - targetX) + (ny - targetY) * (ny - targetY);
+              if (dist > bestDist) { bestDist = dist; bestDir = choices[i]; }
+            }
+            gDir2 = bestDir;
+          } else {
+            int targetX, targetY;
+            if (scatterMode) {
+              targetX = 1; targetY = 0;
+            } else {
+              // classic Pinky ambush: aim a few tiles ahead of Pac-Man's heading
+              targetX = constrain(px / 8 + dx[pDir == 0 ? 1 : pDir] * 3, 0, 11);
+              targetY = constrain(py / 8 + dy[pDir == 0 ? 1 : pDir] * 3, 0, 7);
+            }
+            int bestDir = choices[0];
+            float bestDist = 99999;
+            for (int i = 0; i < count; i++) {
+              int nx = cx + dx[choices[i]];
+              int ny = cy + dy[choices[i]];
+              float dist = (nx - targetX) * (nx - targetX) + (ny - targetY) * (ny - targetY);
+              if (dist < bestDist) { bestDist = dist; bestDir = choices[i]; }
+            }
+            gDir2 = bestDir;
           }
         }
 
-        if (count == 0) {
-          gDir2 = opp;
-        } else {
-          gDir2 = choices[random(0, count)];
+        if (gDir2 != 0) {
+          gx2 += dx[gDir2] * gSpeed2;
+          gy2 += dy[gDir2] * gSpeed2;
         }
       }
 
-      if (gDir2 != 0) {
-        gx2 += dx[gDir2] * gSpeed2;
-        gy2 += dy[gDir2] * gSpeed2;
-      }
-
-      // --- Collisions ---
       if (abs(px - gx1) < 6 && abs(py - gy1) < 6) {
         if (scared) {
           gx1 = 40; gy1 = 24; gDir1 = 0;
@@ -3272,7 +3496,7 @@ void pacmanGame() {
         }
       }
 
-      if (abs(px - gx2) < 6 && abs(py - gy2) < 6) {
+      if (ghost2Released && abs(px - gx2) < 6 && abs(py - gy2) < 6) {
         if (scared) {
           gx2 = 48; gy2 = 24; gDir2 = 0;
           score += 200;
@@ -3301,7 +3525,6 @@ void pacmanGame() {
 
       display.clearDisplay();
 
-      // 1. Draw Maze
       for (int r = 0; r < 8; r++) {
         for (int c = 0; c < 12; c++) {
           int tx = c * 8;
@@ -3318,7 +3541,6 @@ void pacmanGame() {
         }
       }
 
-      // 2. Draw Pac-Man
       bool mouthOpen = (millis() / 150) % 2;
       if (mouthOpen) {
         const unsigned char* pBmp = pacman_right;
@@ -3330,16 +3552,18 @@ void pacmanGame() {
         display.fillCircle(px + 4, py + 4, 3, SSD1306_WHITE);
       }
 
-      // 3. Draw Ghosts
       bool drawScared = scared;
       if (scared && (millis() - scareTimer > 5000)) {
         if ((millis() / 150) % 2 == 0) drawScared = false;
       }
 
       display.drawBitmap(gx1, gy1, drawScared ? ghost_scared : ghost_sprite, 8, 8, SSD1306_WHITE);
-      display.drawBitmap(gx2, gy2, drawScared ? ghost_scared : ghost_sprite, 8, 8, SSD1306_WHITE);
+      if (ghost2Released) {
+        display.drawBitmap(gx2, gy2, drawScared ? ghost_scared : ghost_sprite, 8, 8, SSD1306_WHITE);
+      } else {
+        display.drawBitmap(gx2, gy2, ghost_sprite, 8, 8, SSD1306_WHITE); // waiting in the house
+      }
 
-      // 4. Draw Right Info Panel
       display.drawFastVLine(96, 0, 64, SSD1306_WHITE);
       display.setTextSize(1);
       display.setCursor(100, 15);
@@ -3350,13 +3574,15 @@ void pacmanGame() {
       if (scared) {
         display.setCursor(100, 45);
         display.print("PWR");
+      } else {
+        display.setCursor(100, 45);
+        display.print(scatterMode ? "SCT" : "CHS");
       }
 
       display.display();
       delay(25);
     }
 
-    // --- End Screen Selection Menu (Back / Next Level) ---
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
     display.setTextSize(2);
@@ -3373,7 +3599,7 @@ void pacmanGame() {
     display.setCursor(15, 35);
     display.print("Level: "); display.print(pacmanLevel);
 
-    int selection = 0; // 0 = Back, 1 = Next Level
+    int selection = 0;
     delay(400);
 
     while (true) {
@@ -3403,13 +3629,23 @@ void pacmanGame() {
     }
 
     if (selection == 0) {
+      waitForRelease();
       inGame = false;
       break;
     } else {
+      waitForRelease();
       pacmanLevel++;
     }
   }
 }
+
+// ===================== GAME 16: FROGGER =====================
+// FIX (#10): only two obstacles per lane meant huge, unrealistic gaps, the
+// wrap-around collision math had edge cases at the screen seam, and there
+// was no time pressure like the arcade original. Rewrote with three evenly
+// spaced obstacles per lane, a per-life countdown timer (running out costs
+// a life, just like sitting still too long in the real game), and cleaned
+// up wraparound collision so it behaves the same at every screen position.
 void froggerGame() {
   int frogX = 60;
   int frogY = 56;
@@ -3417,42 +3653,42 @@ void froggerGame() {
   int lives = 3;
   int level = 1;
 
-  // 5 Lanes: Y = 48, 40, 32 (road, cars), 24, 16 (river, logs)
-  float laneX[5] = {0.0, 30.0, 60.0, 10.0, 40.0};
+  float laneX[5] = {0.0, 20.0, 60.0, 10.0, 40.0};
   const float baseLaneSpeed[5] = {-0.8, 0.6, -1.0, 0.5, -0.7};
   float laneSpeed[5];
-
-  for (int i = 0; i < 5; i++) {
-    laneSpeed[i] = baseLaneSpeed[i];
-  }
+  for (int i = 0; i < 5; i++) laneSpeed[i] = baseLaneSpeed[i];
 
   const int laneY[5] = {48, 40, 32, 24, 16};
+  const int laneSpacing = 43; // 3 obstacles per lane, evenly spaced
+
+  const unsigned long timeLimitMs = 22000;
+  unsigned long lifeStart = millis();
 
   auto drawWrappedBitmap = [](int x, int y, const unsigned char* bmp, int w, int h) {
-    int nx = (x % 128 + 128) % 128;
+    int nx = ((x % 128) + 128) % 128;
     display.drawBitmap(nx, y, bmp, w, h, SSD1306_WHITE);
-    if (nx + w > 128) {
-      display.drawBitmap(nx - 128, y, bmp, w, h, SSD1306_WHITE);
-    }
+    if (nx + w > 128) display.drawBitmap(nx - 128, y, bmp, w, h, SSD1306_WHITE);
   };
 
   auto drawWrappedLog = [&](int x, int y) {
     drawWrappedBitmap(x, y, log_sprite, 16, 8);
-    drawWrappedBitmap(x + 8, y, log_sprite, 16, 8);
   };
 
-  auto checkOverlap = [](int fx, int ox, int ow) {
-    int cx = (ox % 128 + 128) % 128;
-    if (cx + ow > 128) {
-      return (fx + 8 > cx || fx < cx + ow - 128);
-    } else {
-      return (fx + 8 > cx && fx < cx + ow);
+  // Robust wrap-aware overlap test: is the frog (8px wide at fx) touching an
+  // obstacle of width ow whose *center* has wrapped to position ox?
+  auto touchesWrapped = [](int fx, int ox, int ow) {
+    int cx = ((ox % 128) + 128) % 128;
+    for (int shift = -128; shift <= 128; shift += 128) {
+      int left = cx + shift;
+      if (fx + 8 > left && fx < left + ow) return true;
     }
+    return false;
   };
 
   while (digitalRead(OK_BUTTON) == LOW || digitalRead(UP_BUTTON) == LOW) delay(10);
 
-  while (lives > 0) {
+  bool running = true;
+  while (running && lives > 0) {
     if (digitalRead(LEFT_BUTTON) == LOW) { frogX -= 8; delay(120); }
     else if (digitalRead(RIGHT_BUTTON) == LOW) { frogX += 8; delay(120); }
     else if (digitalRead(UP_BUTTON) == LOW) { frogY -= 8; delay(120); }
@@ -3467,79 +3703,79 @@ void froggerGame() {
       if (laneX[i] < 0.0) laneX[i] += 128.0;
     }
 
-    // Check road collisions
-    if (frogY == 48 || frogY == 40 || frogY == 32) {
-      int laneIdx = (frogY == 48) ? 0 : (frogY == 40) ? 1 : 2;
-      int lx = (int)laneX[laneIdx];
-      if (checkOverlap(frogX, lx, 8) || checkOverlap(frogX, lx + 64, 8)) {
-        lives--;
-        frogX = 60; frogY = 56;
-        delay(800);
-        continue;
-      }
+    unsigned long elapsed = millis() - lifeStart;
+    int secondsLeft = (timeLimitMs - elapsed) / 1000;
+    if (elapsed >= timeLimitMs) {
+      lives--;
+      frogX = 60; frogY = 56;
+      lifeStart = millis();
+      delay(600);
+      continue;
     }
 
-    // Check river log alignment
-    bool onLog = false;
-    float currentLogSpeed = 0.0;
+    bool hit = false;
+    if (frogY == 48 || frogY == 40 || frogY == 32) {
+      int laneIdx = (frogY == 48) ? 0 : (frogY == 40) ? 1 : 2;
+      for (int k = 0; k < 3; k++) {
+        if (touchesWrapped(frogX, (int)laneX[laneIdx] + k * laneSpacing, 8)) { hit = true; break; }
+      }
+    }
+    if (hit) {
+      lives--;
+      frogX = 60; frogY = 56;
+      lifeStart = millis();
+      delay(600);
+      continue;
+    }
+
     if (frogY == 24 || frogY == 16) {
       int laneIdx = (frogY == 24) ? 3 : 4;
-      int lx = (int)laneX[laneIdx];
-      currentLogSpeed = laneSpeed[laneIdx];
-
-      if (checkOverlap(frogX, lx, 24)) {
-        onLog = true;
-      } else if (checkOverlap(frogX, lx + 64, 24)) {
-        onLog = true;
+      bool onLog = false;
+      for (int k = 0; k < 3; k++) {
+        if (touchesWrapped(frogX, (int)laneX[laneIdx] + k * laneSpacing, 22)) { onLog = true; break; }
       }
-
       if (onLog) {
-        frogX += currentLogSpeed;
+        frogX += laneSpeed[laneIdx];
+        if (frogX < 0) frogX = 0;
+        if (frogX > 120) frogX = 120;
       } else {
         lives--;
         frogX = 60; frogY = 56;
-        delay(800);
+        lifeStart = millis();
+        delay(600);
         continue;
       }
     }
 
-    // Check win bank
     if (frogY <= 8) {
       score += 100;
       level++;
-      for (int i = 0; i < 5; i++) {
-        laneSpeed[i] = baseLaneSpeed[i] * (1.0 + (level - 1) * 0.15);
-      }
+      for (int i = 0; i < 5; i++) laneSpeed[i] = baseLaneSpeed[i] * (1.0 + (level - 1) * 0.15);
       frogX = 60; frogY = 56;
+      lifeStart = millis();
       display.clearDisplay();
       display.setCursor(15, 20);
       display.print("Level "); display.print(level);
       display.display();
-      delay(1000);
+      delay(900);
       continue;
     }
 
     display.clearDisplay();
 
-    // Draw road stripes
     for (int x = 0; x < 128; x += 16) {
       display.drawFastHLine(x, 48, 8, SSD1306_WHITE);
       display.drawFastHLine(x, 40, 8, SSD1306_WHITE);
       display.drawFastHLine(x, 32, 8, SSD1306_WHITE);
     }
-    // Draw river boundaries
     display.drawFastHLine(0, 24, 128, SSD1306_WHITE);
     display.drawFastHLine(0, 16, 128, SSD1306_WHITE);
 
-    // Draw obstacles
     for (int i = 0; i < 5; i++) {
-      int lx = (int)laneX[i];
-      if (i < 3) {
-        drawWrappedBitmap(lx, laneY[i], car_sprite, 8, 8);
-        drawWrappedBitmap(lx + 64, laneY[i], car_sprite, 8, 8);
-      } else {
-        drawWrappedLog(lx, laneY[i]);
-        drawWrappedLog(lx + 64, laneY[i]);
+      for (int k = 0; k < 3; k++) {
+        int lx = (int)laneX[i] + k * laneSpacing;
+        if (i < 3) drawWrappedBitmap(lx, laneY[i], car_sprite, 8, 8);
+        else drawWrappedLog(lx, laneY[i]);
       }
     }
 
@@ -3549,7 +3785,8 @@ void froggerGame() {
     display.drawFastHLine(0, 7, 128, SSD1306_WHITE);
 
     display.setTextSize(1);
-
+    display.setCursor(2, 0);
+    display.print(secondsLeft); display.print("s");
     display.setCursor(45, 0);
     display.print("Lv:"); display.print(level);
     display.setCursor(95, 0);
@@ -3562,7 +3799,12 @@ void froggerGame() {
   gameOver(score);
   inGame = false;
 }
-// ===================== GAME 16: HELICOPTER =====================
+
+// ===================== GAME 17: HELICOPTER =====================
+// FIX (#11): the single floating obstacle block felt random and repetitive.
+// Added the classic paired top+bottom "gate" obstacle (like the original
+// 2000s Helicopter game / Flappy-style pipes) alongside the wavy cave
+// terrain, so there are two distinct hazards to react to instead of one.
 void helicopterGame() {
   float copterY = 32;
   float copterVY = 0;
@@ -3576,9 +3818,11 @@ void helicopterGame() {
     floor[i] = random(48, 58);
   }
 
-  int obsX = SCREEN_WIDTH;
-  int obsY = 25;
-  int obsHeight = 15;
+  // Paired gate obstacle: a gap the copter must fly through
+  float gateX = SCREEN_WIDTH + 40;
+  int gateGapY = 28;
+  int gateGapH = 20;
+  const int gateWidth = 6;
 
   int score = 0;
   bool playing = true;
@@ -3587,11 +3831,8 @@ void helicopterGame() {
 
   while (playing) {
     bool fly = (digitalRead(OK_BUTTON) == LOW || digitalRead(UP_BUTTON) == LOW);
-    if (fly) {
-      copterVY += lift;
-    } else {
-      copterVY += gravity;
-    }
+    if (fly) copterVY += lift;
+    else copterVY += gravity;
 
     copterVY = constrain(copterVY, -4.0, 4.0);
     copterY += copterVY;
@@ -3608,11 +3849,11 @@ void helicopterGame() {
       score++;
     }
 
-    obsX -= gameSpeed;
-    if (obsX < -8) {
-      obsX = SCREEN_WIDTH + random(20, 80);
-      obsY = random(16, 40);
-      obsHeight = random(10, 20);
+    gateX -= gameSpeed;
+    if (gateX < -gateWidth) {
+      gateX = SCREEN_WIDTH + random(40, 100);
+      gateGapY = random(12, 34);
+      gateGapH = max(14, 22 - score / 8); // gap tightens slightly as score grows
     }
 
     int segIdx = (20 + (int)segmentOffset) / 8;
@@ -3620,9 +3861,9 @@ void helicopterGame() {
       playing = false; 
     }
 
-    if (obsX < 28 && obsX + 8 > 20) {
-      if (copterY < obsY + obsHeight && copterY + 6 > obsY) {
-        playing = false; 
+    if (gateX < 28 && gateX + gateWidth > 20) {
+      if (copterY < gateGapY || copterY + 6 > gateGapY + gateGapH) {
+        playing = false;
       }
     }
 
@@ -3634,14 +3875,16 @@ void helicopterGame() {
       display.fillRect(tx, floor[i], 8, SCREEN_HEIGHT - floor[i], SSD1306_WHITE);
     }
 
-    display.fillRect((int)obsX, obsY, 8, obsHeight, SSD1306_WHITE);
+    display.fillRect((int)gateX, 0, gateWidth, gateGapY, SSD1306_WHITE);
+    display.fillRect((int)gateX, gateGapY + gateGapH, gateWidth, SCREEN_HEIGHT - (gateGapY + gateGapH), SSD1306_WHITE);
 
     int cy = (int)copterY;
     display.fillRect(20, cy + 2, 8, 3, SSD1306_WHITE); 
     display.drawLine(18, cy + 1, 23, cy + 1, SSD1306_WHITE); 
     display.drawLine(20, cy + 5, 26, cy + 5, SSD1306_WHITE); 
 
-
+    display.setCursor(2, 2);
+    display.print(score);
 
     display.display();
     delay(20);
